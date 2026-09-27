@@ -6,6 +6,7 @@ from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
 from metrics.dora import LogError, compute as compute_dora_metrics
+from metrics.weekly import compute_weekly
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -182,6 +183,18 @@ async def dora_metrics(request: Request) -> JSONResponse:
         return JSONResponse(status_code=400, content={"error": {"code": "validation", "message": "body is not JSON"}})
     try:
         return JSONResponse(content=compute_dora_metrics(body))
+    except LogError as exc:
+        return JSONResponse(status_code=422, content={"error": {"code": "validation", "message": str(exc)}})
+
+
+@app.post("/dora/metrics/weekly")
+async def dora_metrics_weekly(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": {"code": "validation", "message": "body is not JSON"}})
+    try:
+        return JSONResponse(content=compute_weekly(body))
     except LogError as exc:
         return JSONResponse(status_code=422, content={"error": {"code": "validation", "message": str(exc)}})
 

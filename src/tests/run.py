@@ -246,6 +246,26 @@ def dora_revert_of_revert_is_one_change():
 
 
 @test
+def dora_weekly_splits_window_into_buckets():
+    events = [
+        _commit(1, "2026-09-01T00:00:00Z", "CHG-1"),
+        _deploy(1, "2026-09-02T00:00:00Z", ["sha-1"]),
+        _deploy(2, "2026-09-09T00:00:00Z", []),
+        _deploy(3, "2026-09-10T00:00:00Z", [], outcome="failure"),
+    ]
+    status, body = _request("POST", "/dora/metrics/weekly", {"window": _WINDOW, "events": events})
+    assert status == 200, body
+    weeks = body["weeks"]
+    assert [w["window"]["from"] for w in weeks] == [
+        "2026-09-01T00:00:00Z", "2026-09-08T00:00:00Z", "2026-09-15T00:00:00Z"]
+    assert weeks[-1]["window"]["to"] == "2026-09-22T00:00:00Z"
+    assert [w["counts"]["deployments"] for w in weeks] == [1, 2, 0]
+    assert weeks[0]["change_lead_time_seconds_p50"] == 86400
+    assert weeks[1]["change_fail_rate"] == 0.5
+    assert weeks[2]["change_fail_rate"] is None
+
+
+@test
 def ticket_events_stream_phases():
     ticket = _create_ticket("2026-10-14T10:00:00Z", 1, 1, title="stream me")
     _request("POST", f"/tickets/{ticket['id']}/ack", headers={"X-Test-Clock": "2026-10-14T10:05:00Z"})
