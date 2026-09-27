@@ -5,6 +5,7 @@ from datetime import datetime, timezone
 from typing import Optional
 
 from fastapi import FastAPI, HTTPException, Request
+from metrics.dora import LogError, compute as compute_dora_metrics
 from fastapi.exceptions import RequestValidationError
 from fastapi.responses import JSONResponse
 from starlette.exceptions import HTTPException as StarletteHTTPException
@@ -168,3 +169,40 @@ def close_ticket(ticket_id: str, request: Request) -> dict:
 @app.post("/tickets/{ticket_id}/reopen")
 def reopen_ticket(ticket_id: str, request: Request) -> dict:
     return _perform_action(ticket_id, "reopen", request)
+
+
+# --- Lab 2: DORA metrics (lab2 METRIC-SPEC.md sections 6 and 7) ---------------------------------------------
+
+
+@app.post("/dora/metrics")
+async def dora_metrics(request: Request) -> JSONResponse:
+    try:
+        body = await request.json()
+    except ValueError:
+        return JSONResponse(status_code=400, content={"error": {"code": "validation", "message": "body is not JSON"}})
+    try:
+        return JSONResponse(content=compute_dora_metrics(body))
+    except LogError as exc:
+        return JSONResponse(status_code=422, content={"error": {"code": "validation", "message": str(exc)}})
+
+
+_PHASES = (
+    ("created", "created_at", "new"),
+    ("acknowledged", "acknowledged_at", "acknowledged"),
+    ("resolved", "resolved_at", "resolved"),
+    ("closed", "closed_at", "closed"),
+)
+
+
+@app.get("/dora/ticket-events")
+def ticket_events() -> list[dict]:
+    stream = []
+    for record in storage.list_all():
+        for phase, field, state in _PHASES:
+            if record[field] is not None:
+                stream.append((record[field], record["id"], phase, record["priority"], state))
+    stream.sort(key=lambda e: (e[0], e[1]))
+    return [
+        {"ticket_id": ticket_id, "at": _iso(at), "phase": phase, "priority": priority, "state": state}
+        for at, ticket_id, phase, priority, state in stream
+    ]

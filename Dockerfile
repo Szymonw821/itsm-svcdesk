@@ -10,6 +10,9 @@ RUN pip install --no-cache-dir -r /app/requirements.txt
 
 # Code lives under src/svcdesk (see src/README.md).
 COPY src/ /app/src/
+# Lab 2: the DORA metric computation lives under metrics/ at the repository root.
+COPY metrics/ /app/metrics/
+ENV PYTHONPATH=/app
 
 EXPOSE 8080
 CMD ["uvicorn", "svcdesk.main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8080"]

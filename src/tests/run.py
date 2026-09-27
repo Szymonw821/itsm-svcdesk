@@ -179,6 +179,84 @@ def list_filters_by_state():
     assert any(t["id"] == ticket["id"] for t in body)
 
 
+_WINDOW = {"from": "2026-09-01T00:00:00Z", "to": "2026-09-22T00:00:00Z"}
+
+
+def _commit(n, at, change_id, reverts=None, branch="main"):
+    return {"event_id": f"c-{n}", "type": "commit", "at": at, "sha": f"sha-{n}", "branch": branch,
+            "change_id": change_id, "reverts": reverts}
+
+
+def _deploy(n, at, commits, outcome="success", environment="production"):
+    return {"event_id": f"d-{n}", "type": "deployment", "at": at, "deployment_id": f"DEP-{n}",
+            "environment": environment, "outcome": outcome, "commits": commits, "unplanned": False,
+            "caused_by": None}
+
+
+@test
+def dora_empty_log():
+    status, body = _request("POST", "/dora/metrics", {"window": _WINDOW, "events": []})
+    assert status == 200, body
+    assert body["deployment_frequency_per_day"] == 0.0
+    assert body["change_lead_time_seconds_p50"] is None
+    assert body["change_fail_rate"] is None
+
+
+@test
+def dora_rejects_empty_window():
+    window = {"from": "2026-09-22T00:00:00Z", "to": "2026-09-22T00:00:00Z"}
+    status, body = _request("POST", "/dora/metrics", {"window": window, "events": []})
+    assert status in (400, 422) and "error" in body
+
+
+@test
+def dora_rejects_dangling_revert():
+    events = [_commit(1, "2026-09-02T00:00:00Z", None, reverts="sha-missing")]
+    status, body = _request("POST", "/dora/metrics", {"window": _WINDOW, "events": events})
+    assert status in (400, 422) and "error" in body
+
+
+@test
+def dora_clamps_clock_skew_and_ignores_staging():
+    events = [
+        _commit(1, "2026-09-02T10:00:10Z", "CHG-1"),  # 10 s after the deployment: E1
+        _deploy(1, "2026-09-02T10:00:00Z", ["sha-1"]),
+        _deploy(2, "2026-09-02T09:00:00Z", ["sha-1"], environment="staging"),
+    ]
+    status, body = _request("POST", "/dora/metrics", {"window": _WINDOW, "events": events})
+    assert status == 200, body
+    assert body["counts"]["deployments"] == 1
+    assert body["change_lead_time_seconds_p50"] == 0
+    assert body["anomalies"]["negative_lead_time_pairs"] == 1
+
+
+@test
+def dora_revert_of_revert_is_one_change():
+    events = [
+        _commit(1, "2026-09-02T00:00:00Z", "CHG-1"),
+        _commit(2, "2026-09-02T01:00:00Z", None, reverts="sha-1"),
+        _commit(3, "2026-09-02T02:00:00Z", None, reverts="sha-2"),
+        _deploy(1, "2026-09-02T03:00:00Z", ["sha-3"]),
+    ]
+    status, body = _request("POST", "/dora/metrics", {"window": _WINDOW, "events": events})
+    assert status == 200, body
+    assert body["counts"]["changes"] == 1
+    assert body["anomalies"]["revert_chains_collapsed"] == 2
+    assert body["ground_truth"]["true_change_lead_time_seconds_p50"] == 3 * 3600
+
+
+@test
+def ticket_events_stream_phases():
+    ticket = _create_ticket("2026-10-14T10:00:00Z", 1, 1, title="stream me")
+    _request("POST", f"/tickets/{ticket['id']}/ack", headers={"X-Test-Clock": "2026-10-14T10:05:00Z"})
+    status, body = _request("GET", "/dora/ticket-events")
+    assert status == 200
+    mine = [e for e in body if e["ticket_id"] == ticket["id"]]
+    assert [e["phase"] for e in mine] == ["created", "acknowledged"]
+    assert [e["state"] for e in mine] == ["new", "acknowledged"]
+    assert body == sorted(body, key=lambda e: (e["at"], e["ticket_id"]))
+
+
 def main() -> None:
     _wait_for_health()
     passed = failed = 0

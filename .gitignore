@@ -7,3 +7,5 @@ __pycache__/
 # local data: use a named volume in docker-compose.yml, never a bind mount
 data/
 *.db
+# the downloaded Lab 2 course package (only its fixtures/ belongs in the repository, copied to the root)
+lab2/
