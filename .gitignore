@@ -9,3 +9,5 @@ data/
 *.db
 # the downloaded Lab 2 course package (only its fixtures/ belongs in the repository, copied to the root)
 lab2/
+# the downloaded Lab 3 course package (its templates are copied to the root)
+lab3/

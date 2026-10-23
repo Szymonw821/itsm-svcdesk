@@ -8,17 +8,19 @@ from fastapi import FastAPI, HTTPException, Request
 from metrics.dora import LogError, compute as compute_dora_metrics
 from metrics.weekly import compute_weekly
 from fastapi.exceptions import RequestValidationError
-from fastapi.responses import JSONResponse
+from fastapi.responses import JSONResponse, Response
 from starlette.exceptions import HTTPException as StarletteHTTPException
 
-from . import storage
+from . import kb, storage
 from .clock import ClockError, resolve_now
 from .models import TicketCreate
+from .observability import METRICS_CONTENT_TYPE, RequestDurationMiddleware, render_metrics
 from .priority import compute_priority
 from .sla import compute_breach_and_pause, compute_sla_due
 from .state_machine import InvalidTransition, apply_action
 
 app = FastAPI()
+app.add_middleware(RequestDurationMiddleware)
 
 _ERROR_CODES = {400: "validation", 404: "not_found", 409: "invalid_transition", 422: "validation"}
 
@@ -219,3 +221,28 @@ def ticket_events() -> list[dict]:
         {"ticket_id": ticket_id, "at": _iso(at), "phase": phase, "priority": priority, "state": state}
         for at, ticket_id, phase, priority, state in stream
     ]
+
+
+# --- Lab 3: knowledge-base search and the request histogram (lab3 MONITORING-SPEC.md M-02, M-03) -----------
+
+
+@app.on_event("shutdown")
+async def close_kb_client() -> None:
+    await kb.close()
+
+
+@app.get("/metrics")
+def metrics() -> Response:
+    return Response(content=render_metrics(), media_type=METRICS_CONTENT_TYPE)
+
+
+@app.get("/kb/search")
+async def kb_search(q: Optional[str] = None) -> JSONResponse:
+    if q is None or not 1 <= len(q) <= kb.Q_MAX_LENGTH:
+        message = f"q must be 1 to {kb.Q_MAX_LENGTH} characters"
+        return JSONResponse(status_code=400, content={"error": {"code": "validation", "message": message}})
+    try:
+        hits = await kb.search(q)
+    except kb.UpstreamUnavailable as exc:
+        return JSONResponse(status_code=502, content={"error": {"code": "upstream_unavailable", "message": str(exc)}})
+    return JSONResponse(content={"query": q, "hits": hits})

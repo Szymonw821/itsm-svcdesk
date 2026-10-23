@@ -1,0 +1,55 @@
+# ai-generated: 80% - Claude Code wrote the rules from slo.md and lab3 MONITORING-SPEC.md M-17 to M-19, edges checked with promtool, reviewed by the author
+# prometheus/alerts.yml - the SLO alerts of GET /kb/search (slo.md declares them; MONITORING-SPEC.md M-17 to M-21).
+#
+# Both alerts are on the availability SLI (objective 0.99, so an error ratio of 1 % burns the budget at rate 1),
+# multiwindow as in the SRE Workbook: the long window says the budget is really being spent, the short window
+# says it is still being spent, so the alert stops within minutes of the errors stopping. The thresholds are
+# written as constants in each alert (M-18); there are no recording rules.
+groups:
+  - name: svcdesk-slo
+    rules:
+      # Burn rate 14.4: 2 % of the 30-day budget gone in one hour; at this rate the budget lasts about 2 days.
+      - alert: KbSearchErrorsBurnFast
+        expr: |
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[1h]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[1h]))
+          ) > 14.4 * (1 - 0.99)
+          and
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[5m]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[5m]))
+          ) > 14.4 * (1 - 0.99)
+        for: 2m
+        labels:
+          service: svcdesk
+          slo: availability
+          severity: P1
+        annotations:
+          summary: "/kb/search: over 14.4 % of searches fail (1h and 5m); the 30-day error budget is gone in 2 days at this rate"
+          description: "Check kb-index first (GET /stats, its logs): svcdesk answers 502 only when kb-index fails or times out."
+
+      # Burn rate 6: 5 % of the 30-day budget gone in six hours; at this rate the budget lasts 5 days.
+      - alert: KbSearchErrorsBurnSlow
+        expr: |
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[6h]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[6h]))
+          ) > 6 * (1 - 0.99)
+          and
+          (
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[30m]))
+              /
+            sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[30m]))
+          ) > 6 * (1 - 0.99)
+        for: 5m
+        labels:
+          service: svcdesk
+          slo: availability
+          severity: P2
+        annotations:
+          summary: "/kb/search: over 6 % of searches fail (6h and 30m); the 30-day error budget is gone in 5 days at this rate"
+          description: "Not a page: look at it in working hours. Check kb-index's error rate and whether a degradation is running."

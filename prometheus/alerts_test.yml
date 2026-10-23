@@ -1,0 +1,98 @@
+# ai-generated: 80% - Claude Code wrote the tests and found each first firing evaluation by scanning with promtool, reviewed by the author
+# prometheus/alerts_test.yml - promtool unit tests of alerts.yml (MONITORING-SPEC.md M-20, M-21). Run from the repo root:
+#   docker run --rm -v "$PWD/prometheus:/p" -w /p --entrypoint promtool prom/prometheus:v3.15.0 test rules alerts_test.yml
+#
+# Every alert gets both edges of its first firing evaluation (not firing one minute before it, firing at it), which
+# kill the `for` +/- 5m and threshold x/÷ 1.5 mutants, and a long burn just below its threshold that must never
+# fire. The first firing minutes (101m and 585m) were found with promtool itself, one test per candidate minute.
+#
+# Traffic: 10 /kb/search requests per second, 600 per minute, plus 600 per minute on /tickets/{id} with 5xx
+# statuses: noise that a rule without the route filter would count.
+rule_files:
+  - alerts.yml
+
+evaluation_interval: 1m
+
+tests:
+  # KbSearchErrorsBurnFast: healthy for 70 minutes, then 30 % of searches fail (about twice the 14.4 % threshold).
+  # The 1h ratio crosses 14.4 % at 99m, the alert is pending from then, and `for: 2m` makes it fire at 101m.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}'
+        values: '0+600x70 42420+420x120'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}'
+        values: '0x70 180+180x120'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/tickets/{id}", http_response_status_code="500"}'
+        values: '0+600x190'
+    alert_rule_test:
+      - eval_time: 69m
+        alertname: KbSearchErrorsBurnFast
+        exp_alerts: []
+      # the lower edge: kills `for - 5m` and `threshold / 1.5`
+      - eval_time: 100m
+        alertname: KbSearchErrorsBurnFast
+        exp_alerts: []
+      # the upper edge: kills `for + 5m` and `threshold x 1.5`
+      - eval_time: 101m
+        alertname: KbSearchErrorsBurnFast
+        exp_alerts:
+          - exp_labels: {service: svcdesk, slo: availability, severity: P1}
+            exp_annotations:
+              summary: "/kb/search: over 14.4 % of searches fail (1h and 5m); the 30-day error budget is gone in 2 days at this rate"
+              description: "Check kb-index first (GET /stats, its logs): svcdesk answers 502 only when kb-index fails or times out."
+
+  # KbSearchErrorsBurnFast below its threshold: 13 % of searches fail for three hours, which must never page.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}'
+        values: '0+522x200'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}'
+        values: '0+78x200'
+    alert_rule_test:
+      - eval_time: 60m
+        alertname: KbSearchErrorsBurnFast
+        exp_alerts: []
+      - eval_time: 120m
+        alertname: KbSearchErrorsBurnFast
+        exp_alerts: []
+      - eval_time: 200m
+        alertname: KbSearchErrorsBurnFast
+        exp_alerts: []
+
+  # KbSearchErrorsBurnSlow: healthy for 400 minutes, then 12 % of searches fail (twice the 6 % threshold).
+  # The 6h ratio crosses 6 % at 580m, and `for: 5m` makes the alert fire at 585m.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}'
+        values: '0+600x400 240528+528x300'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}'
+        values: '0x400 72+72x300'
+    alert_rule_test:
+      - eval_time: 584m
+        alertname: KbSearchErrorsBurnSlow
+        exp_alerts: []
+      - eval_time: 585m
+        alertname: KbSearchErrorsBurnSlow
+        exp_alerts:
+          - exp_labels: {service: svcdesk, slo: availability, severity: P2}
+            exp_annotations:
+              summary: "/kb/search: over 6 % of searches fail (6h and 30m); the 30-day error budget is gone in 5 days at this rate"
+              description: "Not a page: look at it in working hours. Check kb-index's error rate and whether a degradation is running."
+
+  # KbSearchErrorsBurnSlow below its threshold: 5.5 % of searches fail for 18 hours, which must never fire.
+  - interval: 1m
+    input_series:
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="200"}'
+        values: '0+567x1080'
+      - series: 'http_server_request_duration_seconds_count{job="svcdesk", instance="svcdesk:8080", http_request_method="GET", http_route="/kb/search", http_response_status_code="502"}'
+        values: '0+33x1080'
+    alert_rule_test:
+      - eval_time: 6h
+        alertname: KbSearchErrorsBurnSlow
+        exp_alerts: []
+      - eval_time: 12h
+        alertname: KbSearchErrorsBurnSlow
+        exp_alerts: []
+      - eval_time: 18h
+        alertname: KbSearchErrorsBurnSlow
+        exp_alerts: []
