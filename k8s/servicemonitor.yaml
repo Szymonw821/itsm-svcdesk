@@ -1,0 +1,21 @@
+# ai-generated: 90% - Claude Code wrote it from lab3 MONITORING-SPEC.md M-31, reviewed by the author
+# k8s/servicemonitor.yaml - lets the kube-prometheus-stack Prometheus scrape svcdesk's /metrics every 5 s, as the
+# checker's Prometheus does. The job label is set to svcdesk so that the alert rules' job="svcdesk" match.
+apiVersion: monitoring.coreos.com/v1
+kind: ServiceMonitor
+metadata:
+  name: svcdesk
+  namespace: default
+  labels:
+    app: svcdesk
+spec:
+  jobLabel: app
+  selector:
+    matchLabels:
+      app: svcdesk
+  namespaceSelector:
+    matchNames: [default]
+  endpoints:
+    - port: http
+      path: /metrics
+      interval: 5s

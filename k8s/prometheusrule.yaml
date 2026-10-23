@@ -1,0 +1,56 @@
+# ai-generated: 90% - Claude Code generated it from prometheus/alerts.yml (same groups, rules, for and labels), reviewed by the author
+# k8s/prometheusrule.yaml - prometheus/alerts.yml as a PrometheusRule for kube-prometheus-stack (Stretch 3, M-31).
+# Regenerate it from alerts.yml whenever the rules change: the checker requires the same groups and rules.
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: svcdesk-slo
+  namespace: default
+  labels:
+    app: svcdesk
+spec:
+  groups:
+  - name: svcdesk-slo
+    rules:
+    - alert: KbSearchErrorsBurnFast
+      expr: |
+        (
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[1h]))
+            /
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[1h]))
+        ) > 14.4 * (1 - 0.99)
+        and
+        (
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[5m]))
+            /
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[5m]))
+        ) > 14.4 * (1 - 0.99)
+      for: 2m
+      labels:
+        service: svcdesk
+        slo: availability
+        severity: P1
+      annotations:
+        summary: '/kb/search: over 14.4 % of searches fail (1h and 5m); the 30-day error budget is gone in 2 days at this rate'
+        description: 'Check kb-index first (GET /stats, its logs): svcdesk answers 502 only when kb-index fails or times out.'
+    - alert: KbSearchErrorsBurnSlow
+      expr: |
+        (
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[6h]))
+            /
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[6h]))
+        ) > 6 * (1 - 0.99)
+        and
+        (
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search", http_response_status_code=~"5.."}[30m]))
+            /
+          sum(rate(http_server_request_duration_seconds_count{job="svcdesk", http_route="/kb/search"}[30m]))
+        ) > 6 * (1 - 0.99)
+      for: 5m
+      labels:
+        service: svcdesk
+        slo: availability
+        severity: P2
+      annotations:
+        summary: '/kb/search: over 6 % of searches fail (6h and 30m); the 30-day error budget is gone in 5 days at this rate'
+        description: 'Not a page: look at it in working hours. Check kb-index''s error rate and whether a degradation is running.'

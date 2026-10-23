@@ -1,0 +1,62 @@
+# ai-generated: 90% - Claude Code wrote the manifests for the kind cluster, reviewed by the author
+# k8s/svcdesk.yaml - svcdesk and kb-index on the kind cluster (Stretch 3), so that the ServiceMonitor has a target.
+#   docker compose build svcdesk && kind load docker-image itsm-svcdesk-svcdesk:latest ghcr.io/swasik/seeded-toxic:2026
+#   kubectl apply -f k8s/svcdesk.yaml -f k8s/servicemonitor.yaml -f k8s/prometheusrule.yaml
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: kb-index
+  labels: {app: kb-index}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: kb-index}}
+  template:
+    metadata: {labels: {app: kb-index}}
+    spec:
+      containers:
+        - name: kb-index
+          image: ghcr.io/swasik/seeded-toxic:2026
+          imagePullPolicy: IfNotPresent
+          env:
+            - {name: SEEDED_TOXIC_LOGIN, value: szymonw821}
+          ports: [{containerPort: 8080}]
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: kb-index
+  labels: {app: kb-index}
+spec:
+  selector: {app: kb-index}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: svcdesk
+  labels: {app: svcdesk}
+spec:
+  replicas: 1
+  selector: {matchLabels: {app: svcdesk}}
+  template:
+    metadata: {labels: {app: svcdesk}}
+    spec:
+      containers:
+        - name: svcdesk
+          image: itsm-svcdesk-svcdesk:latest
+          imagePullPolicy: Never
+          env:
+            - {name: KB_INDEX_URL, value: "http://kb-index:8080"}
+            - {name: SVCDESK_TEST_CLOCK, value: "1"}
+          ports: [{containerPort: 8080}]
+          readinessProbe:
+            httpGet: {path: /health, port: 8080}
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: svcdesk
+  labels: {app: svcdesk}
+spec:
+  selector: {app: svcdesk}
+  ports: [{name: http, port: 8080, targetPort: 8080}]
