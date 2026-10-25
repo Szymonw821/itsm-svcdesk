@@ -1,0 +1,40 @@
+# ai-generated: 90% - Claude Code (Opus 5.5) wrote the tree and the inhibit rule from lab4 INCIDENT-SPEC.md I-04 to I-08, proved with amtool and a throwaway Alertmanager 0.34.1; reviewed by the author
+# alertmanager/alertmanager.yml - the routing tree (INCIDENT-SPEC.md I-04 to I-08).
+#
+# P1 pages the on-call (pager); P2 and P3 go to chat and never to the pager. Anything without a known severity falls
+# through to the root, chat, so nothing unclassified wakes anyone. svcdesk's Lab 3 alerts (KbSearchErrorsBurnFast
+# P1, KbSearchErrorsBurnSlow P2) join the same tree through their severity.
+#
+# One inhibit rule: while a checkout page fires for the shop, the shop's P2 and P3 alerts of the same `system` are
+# muted - they are the same incident seen from another service, and the on-call is already working it. `equal:
+# [system]` keeps the mute inside the shop: svcdesk's alerts carry no `system`, and a P2 of another system is not
+# muted (routing-tests.yml proves both directions).
+global:
+  resolve_timeout: 5m
+route:
+  receiver: chat                  # the root: an alert that matches no child ends here, never on the pager
+  group_by: [alertname, service]
+  group_wait: 10s                 # part of the MTTA: the first notification of a new group waits this long
+  group_interval: 1m
+  repeat_interval: 4h
+  routes:
+    - matchers: ['severity="P1"']
+      receiver: pager
+    - matchers: ['severity=~"P2|P3"']
+      receiver: chat
+receivers:
+  - name: pager                   # the on-call's phone: http://localhost:18091 shows what reached it
+    webhook_configs:
+      - url: http://pager:8080/hook/pager
+        send_resolved: true
+  - name: chat
+    webhook_configs:
+      - url: http://pager:8080/hook/chat
+        send_resolved: true
+inhibit_rules:
+  - source_matchers:
+      - 'alertname=~"ShopCheckoutErrorRate|ShopCheckoutLatency"'
+      - 'severity="P1"'
+    target_matchers:
+      - 'severity=~"P2|P3"'
+    equal: [system]

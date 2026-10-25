@@ -1,0 +1,94 @@
+# ai-generated: 90% - Claude Code (Opus 5.5) wrote the rules from lab4 INCIDENT-SPEC.md I-01/I-02 and checked every expression on the lab4-rec-4 recording; reviewed by the author
+# prometheus/demo-alerts.yml - symptom alerts on the shop (INCIDENT-SPEC.md I-01, I-02, I-05).
+#
+# The shop's metrics are span metrics pushed once a minute (traces_span_metrics_*), so every window is 5 minutes,
+# every rule counts SERVER spans only (the load generator's own CLIENT calls fail on the healthy shop) and the duration
+# histogram is in milliseconds. Pages (P1) are on what a buyer feels at checkout: orders failing, orders slow. P2 and
+# P3 go to chat: a slow storefront, a traffic surge and one service's own errors are things to look at, and the
+# checkout pages already cover the cases where they hurt orders. All rules sit in one group, so when a page and a
+# chat alert start on the same evaluation the page is the detecting alert (I-12). Every rule carries system="shop",
+# the label the inhibit rule of alertmanager.yml compares.
+#
+# Checked on the lab4-rec-4 recording (2026-10-12): all five return nothing from 06:24Z to the onset at 06:36:23Z;
+# during the fault ShopCheckoutErrorRate (up to 31 %), ShopTrafficSurge (up to 31.7 req/s) and ShopServiceErrorRate
+# (payment, up to 31 %) would have fired. No rule reads a seeded_* series (I-02).
+groups:
+  - name: shop-symptoms
+    rules:
+      # Orders failing: more than 5 % of PlaceOrder answers in 5 minutes are errors. Healthy checkout has no error
+      # series at all, so the ratio is empty on the baseline.
+      - alert: ShopCheckoutErrorRate
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="checkout", span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR"}[5m]))
+            /
+          sum(rate(traces_span_metrics_calls_total{service_name="checkout", span_kind="SPAN_KIND_SERVER"}[5m]))
+          > 0.05
+        for: 1m
+        labels:
+          service: checkout
+          severity: P1
+          system: shop
+        annotations:
+          summary: "More than 5 % of checkout's PlaceOrder requests fail (5 min)"
+          description: "Look at payment, product-catalog and shipping, checkout's upstreams, and at what changed recently (flags, deploys)."
+
+      # Orders slow: the 95th percentile of PlaceOrder above 2 s. Healthy p95 is about 48 ms; a 5 or 10 s shipping
+      # delay on one order in nine, or a 30 s catalog stall, pushes it over.
+      - alert: ShopCheckoutLatency
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name="checkout", span_kind="SPAN_KIND_SERVER"}[5m])))
+          > 2000
+        for: 1m
+        labels:
+          service: checkout
+          severity: P1
+          system: shop
+        annotations:
+          summary: "checkout's p95 PlaceOrder latency is above 2 s (5 min)"
+          description: "Compare shipping, product-catalog and email latency; a slow upstream shows there first."
+
+      # The storefront slow for browsing buyers: frontend p95 above 1.5 s (healthy: under 50 ms).
+      - alert: ShopFrontendLatency
+        expr: |
+          histogram_quantile(0.95, sum by (le) (rate(traces_span_metrics_duration_milliseconds_bucket{service_name="frontend", span_kind="SPAN_KIND_SERVER"}[5m])))
+          > 1500
+        for: 2m
+        labels:
+          service: frontend
+          severity: P2
+          system: shop
+        annotations:
+          summary: "frontend's p95 latency is above 1.5 s (5 min)"
+
+      # A traffic surge at the edge: more than 10 requests/s through frontend-proxy (healthy: about 2/s). Not a page by
+      # itself; it explains a slow shop when one follows.
+      - alert: ShopTrafficSurge
+        expr: |
+          sum(rate(traces_span_metrics_calls_total{service_name="frontend-proxy", span_kind="SPAN_KIND_SERVER"}[5m]))
+          > 10
+        for: 2m
+        labels:
+          service: frontend-proxy
+          severity: P3
+          system: shop
+        annotations:
+          summary: "frontend-proxy serves more than 10 requests/s, about five times the normal load"
+
+      # One service answering its callers with errors (checkout has its own page above). Needs both a ratio and an
+      # absolute rate, so that one failed call of a quiet service does not fire it.
+      - alert: ShopServiceErrorRate
+        expr: |
+          (
+            sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR", service_name!="checkout"}[5m]))
+              /
+            sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind="SPAN_KIND_SERVER", service_name!="checkout"}[5m]))
+          ) > 0.10
+          and
+          sum by (service_name) (rate(traces_span_metrics_calls_total{span_kind="SPAN_KIND_SERVER", status_code="STATUS_CODE_ERROR", service_name!="checkout"}[5m])) > 0.01
+        for: 2m
+        labels:
+          service: shop
+          severity: P3
+          system: shop
+        annotations:
+          summary: "{{ $labels.service_name }} fails more than 10 % of the requests it serves (5 min)"

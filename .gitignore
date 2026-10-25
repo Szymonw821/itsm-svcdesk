@@ -11,3 +11,5 @@ data/
 lab2/
 # the downloaded Lab 3 course package (its templates are copied to the root)
 lab3/
+# the downloaded Lab 4 course package (templates copied to the root; agent/ is run from here)
+lab4/
