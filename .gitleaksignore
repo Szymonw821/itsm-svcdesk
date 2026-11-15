@@ -3,3 +3,6 @@
 # <file>:<rule id>:<line>, as the gate's log prints it). The ignore-policy job enforces CI-SPEC.md P-06: directly above
 # every entry, '#' lines of your own giving the reason, at least 20 characters in total. Leave the blank line below.
 
+# Helm's pod annotation "checksum/secret" in the Lab 3 kube-prometheus-stack evidence dump is a SHA-256 digest of
+# the rendered Secret, not a credential; gitleaks' generic-api-key rule matches it by its key name and entropy.
+k8s/evidence.json:generic-api-key:5545

@@ -19,5 +19,9 @@ COPY src/ /app/src/
 COPY metrics/ /app/metrics/
 ENV PYTHONPATH=/app
 
+# Lab 5 (Semgrep dockerfile.security.missing-user): run as an unprivileged user; svcdesk keeps its state in memory.
+RUN useradd --system --uid 10001 --no-create-home svcdesk
+USER svcdesk
+
 EXPOSE 8080
 CMD ["uvicorn", "svcdesk.main:app", "--app-dir", "/app/src", "--host", "0.0.0.0", "--port", "8080"]
