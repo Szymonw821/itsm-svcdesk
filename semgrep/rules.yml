@@ -1,0 +1,41 @@
+# ai-generated: 100% - Claude Code wrote both rules and their tests for svcdesk's own conventions (CI-SPEC.md P-31)
+rules:
+  # API.md section 8: "now" is per request - the real clock, or X-Test-Clock when SVCDESK_TEST_CLOCK is on. Every
+  # handler must get it from clock.resolve_now(); a second call to the wall clock would silently ignore the test clock.
+  # The rule reports each read of the wall clock, so the single sanctioned one (clock.py) is visible in review and any
+  # new one is a finding.
+  - id: svcdesk-wall-clock-read
+    languages: [python]
+    severity: WARNING
+    message: >-
+      Wall-clock read. In svcdesk only clock.resolve_now() may read the real clock (API.md section 8: X-Test-Clock);
+      anywhere else, take "now" from resolve_now(request.headers.get("x-test-clock")).
+    pattern-either:
+      - pattern: datetime.now(...)
+      - pattern: datetime.utcnow()
+      - pattern: datetime.datetime.now(...)
+      - pattern: datetime.datetime.utcnow()
+      - pattern: time.time()
+
+  # The error envelope {"error": {"code", "message"}} goes to any client. An exception's text placed in it reaches the
+  # client verbatim: fine for svcdesk's own validation errors (LogError, UpstreamUnavailable, ClockError), whose
+  # messages are written for clients, a leak for anything else (paths, hostnames, SQL). The rule reports every place
+  # where the text of a caught exception goes into a JSON response, so that each one is a reviewed decision.
+  - id: svcdesk-exception-text-in-response
+    languages: [python]
+    severity: INFO
+    message: >-
+      The text of a caught exception is sent to the client in the error envelope; make sure the exception's message
+      is written for clients (svcdesk's own validation errors) and never carries internals.
+    patterns:
+      - pattern-either:
+          - pattern-inside: |
+              try:
+                  ...
+              except $TYPE as $EXC:
+                  ...
+          - pattern-inside: |
+              async def $HANDLER(..., $EXC: $TYPE, ...):
+                  ...
+      - pattern-inside: JSONResponse(...)
+      - pattern: str($EXC)
